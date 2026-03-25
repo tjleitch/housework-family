@@ -35,6 +35,14 @@ function computeDueISO(task) {
   return addDaysISO(task.last_done, Math.max(1, task.freq_days));
 }
 
+function isDoneToday(task) {
+  return task.last_done === todayISO();
+}
+
+function isDueOrOverdue(task) {
+  return computeDueISO(task) <= todayISO();
+}
+
 function formatStatus(task) {
   const today = todayISO();
   const due = computeDueISO(task);
@@ -156,6 +164,24 @@ function Button({ children, onClick, disabled = false, kind = "default", type = 
         background: disabled ? "#eee" : bg,
         color: disabled ? "#777" : color,
         cursor: disabled ? "not-allowed" : "pointer",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function TabButton({ active, children, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        padding: "10px 14px",
+        borderRadius: 999,
+        border: "1px solid #ddd",
+        background: active ? "#111" : "#fff",
+        color: active ? "#fff" : "#111",
+        cursor: "pointer",
       }}
     >
       {children}
@@ -290,7 +316,71 @@ function TaskModal({ open, mode, form, setForm, onClose, onSave, onDelete, savin
   );
 }
 
+function TaskCard({ task, onDone, onEdit }) {
+  const doneToday = isDoneToday(task);
+
+  return (
+    <Card
+      style={{
+        position: "relative",
+        overflow: "hidden",
+        opacity: doneToday ? 0.88 : 1,
+      }}
+    >
+      {doneToday && (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            pointerEvents: "none",
+            fontSize: "clamp(72px, 14vw, 140px)",
+            fontWeight: 900,
+            color: "rgba(200, 0, 0, 0.18)",
+            transform: "rotate(-12deg)",
+            letterSpacing: 6,
+            lineHeight: 1,
+            userSelect: "none",
+          }}
+        >
+          DONE
+        </div>
+      )}
+
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ minWidth: 260 }}>
+          <div style={{ fontSize: 18, fontWeight: 600 }}>{task.name}</div>
+
+          <div style={{ marginTop: 6, fontSize: 14, color: "#444" }}>
+            Every {task.freq_days}d · Last done {task.last_done} · Est {task.est_min} min
+          </div>
+
+          <div style={{ marginTop: 6, fontSize: 14 }}>
+            {doneToday ? "Done today" : formatStatus(task)}
+          </div>
+
+          <div style={{ marginTop: 6, fontSize: 13, color: "#666" }}>
+            Last done by: {task.last_done_by || "—"}
+          </div>
+
+          <div style={{ marginTop: 4, fontSize: 13, color: "#666" }}>
+            Updated at: {formatDateTime(task.updated_at)}
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <Button kind="primary" onClick={() => onDone(task)}>Done</Button>
+          <Button onClick={() => onEdit(task)}>Edit</Button>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 export default function App() {
+  const [tab, setTab] = useState("today");
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [errorText, setErrorText] = useState("");
@@ -494,12 +584,30 @@ export default function App() {
     }
   }
 
-  const sortedTasks = useMemo(() => {
+  const allTasksSorted = useMemo(() => {
     return [...tasks].sort((a, b) => {
       const aDue = computeDueISO(a);
       const bDue = computeDueISO(b);
-      return aDue.localeCompare(bDue);
+      if (aDue !== bDue) return aDue.localeCompare(bDue);
+      return a.name.localeCompare(b.name);
     });
+  }, [tasks]);
+
+  const todayTasks = useMemo(() => {
+    return [...tasks]
+      .filter((task) => isDueOrOverdue(task) || isDoneToday(task))
+      .sort((a, b) => {
+        const aDone = isDoneToday(a);
+        const bDone = isDoneToday(b);
+
+        if (aDone !== bDone) return aDone ? -1 : 1;
+
+        const aDue = computeDueISO(a);
+        const bDue = computeDueISO(b);
+        if (aDue !== bDue) return aDue.localeCompare(bDue);
+
+        return a.name.localeCompare(b.name);
+      });
   }, [tasks]);
 
   useEffect(() => {
@@ -551,39 +659,50 @@ export default function App() {
         </div>
       </Card>
 
-      <Card>
-        <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>
-          Import from solo app backup
-        </div>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+        <TabButton active={tab === "today"} onClick={() => setTab("today")}>
+          Today
+        </TabButton>
+        <TabButton active={tab === "all"} onClick={() => setTab("all")}>
+          All Tasks
+        </TabButton>
+      </div>
 
-        <div style={{ fontSize: 14, color: "#444", marginBottom: 10 }}>
-          Choose the JSON backup file you downloaded from the original single-person app.
-          This will replace all tasks currently in the Family app.
-        </div>
+      {tab === "all" && (
+        <>
+          <Card style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>
+              Import from solo app backup
+            </div>
 
-        <input
-          type="file"
-          accept="application/json,.json"
-          onChange={(e) => {
-            const f = e.target.files?.[0] || null;
-            setSelectedFile(f);
-          }}
-        />
+            <div style={{ fontSize: 14, color: "#444", marginBottom: 10 }}>
+              Choose the JSON backup file you downloaded from the original single-person app.
+              This will replace all tasks currently in the Family app.
+            </div>
 
-        <div style={{ marginTop: 10 }}>
-          <Button onClick={importFromBackupReplaceAll} disabled={importing || !selectedFile}>
-            {importing ? "Importing..." : "Replace all tasks from backup"}
-          </Button>
-        </div>
+            <input
+              type="file"
+              accept="application/json,.json"
+              onChange={(e) => {
+                const f = e.target.files?.[0] || null;
+                setSelectedFile(f);
+              }}
+            />
 
-        {selectedFile && (
-          <div style={{ marginTop: 8, fontSize: 13, color: "#555" }}>
-            Selected file: {selectedFile.name}
-          </div>
-        )}
-      </Card>
+            <div style={{ marginTop: 10 }}>
+              <Button onClick={importFromBackupReplaceAll} disabled={importing || !selectedFile}>
+                {importing ? "Importing..." : "Replace all tasks from backup"}
+              </Button>
+            </div>
 
-      <div style={{ height: 14 }} />
+            {selectedFile && (
+              <div style={{ marginTop: 8, fontSize: 13, color: "#555" }}>
+                Selected file: {selectedFile.name}
+              </div>
+            )}
+          </Card>
+        </>
+      )}
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 }}>
         <Button kind="primary" onClick={openAddTask}>+ Add Task</Button>
@@ -596,39 +715,35 @@ export default function App() {
 
       {loading && <p>Loading tasks...</p>}
       {errorText && <p style={{ color: "crimson" }}>{errorText}</p>}
-      {!loading && !errorText && tasks.length === 0 && <p>No tasks found.</p>}
+
+      {!loading && !errorText && tab === "today" && todayTasks.length === 0 && (
+        <p>Nothing due today. Nice work.</p>
+      )}
+
+      {!loading && !errorText && tab === "all" && allTasksSorted.length === 0 && (
+        <p>No tasks found.</p>
+      )}
 
       <div style={{ display: "grid", gap: 12 }}>
-        {sortedTasks.map((task) => (
-          <Card key={task.id}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-              <div style={{ minWidth: 260 }}>
-                <div style={{ fontSize: 18, fontWeight: 600 }}>{task.name}</div>
+        {!loading && !errorText && tab === "today" &&
+          todayTasks.map((task) => (
+            <TaskCard
+              key={task.id}
+              task={task}
+              onDone={markDone}
+              onEdit={openEditTask}
+            />
+          ))}
 
-                <div style={{ marginTop: 6, fontSize: 14, color: "#444" }}>
-                  Every {task.freq_days}d · Last done {task.last_done} · Est {task.est_min} min
-                </div>
-
-                <div style={{ marginTop: 6, fontSize: 14 }}>
-                  {formatStatus(task)}
-                </div>
-
-                <div style={{ marginTop: 6, fontSize: 13, color: "#666" }}>
-                  Last done by: {task.last_done_by || "—"}
-                </div>
-
-                <div style={{ marginTop: 4, fontSize: 13, color: "#666" }}>
-                  Updated at: {formatDateTime(task.updated_at)}
-                </div>
-              </div>
-
-              <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                <Button kind="primary" onClick={() => markDone(task)}>Done</Button>
-                <Button onClick={() => openEditTask(task)}>Edit</Button>
-              </div>
-            </div>
-          </Card>
-        ))}
+        {!loading && !errorText && tab === "all" &&
+          allTasksSorted.map((task) => (
+            <TaskCard
+              key={task.id}
+              task={task}
+              onDone={markDone}
+              onEdit={openEditTask}
+            />
+          ))}
       </div>
 
       <TaskModal
