@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabaseClient";
 
 function todayISO() {
@@ -61,14 +61,9 @@ function readFileText(file) {
 function mapBackupTasksToSupabaseRows(parsedJson) {
   let tasks = [];
 
-  // Support v2 backup format:
-  // { version, exportedAtISO, state: { tasks: [...] } }
   if (parsedJson?.state?.tasks && Array.isArray(parsedJson.state.tasks)) {
     tasks = parsedJson.state.tasks;
-  }
-  // Support older/simple format:
-  // { tasks: [...] }
-  else if (parsedJson?.tasks && Array.isArray(parsedJson.tasks)) {
+  } else if (parsedJson?.tasks && Array.isArray(parsedJson.tasks)) {
     tasks = parsedJson.tasks;
   } else {
     throw new Error("Could not find tasks in backup JSON.");
@@ -99,6 +94,190 @@ function mapBackupTasksToSupabaseRows(parsedJson) {
   return rows;
 }
 
+function emptyTaskForm() {
+  return {
+    name: "",
+    freq_days: "7",
+    last_done: todayISO(),
+    est_min: "15",
+  };
+}
+
+function validateTaskForm(form) {
+  const name = String(form.name || "").trim();
+  const freqDays = Number(form.freq_days);
+  const lastDone = String(form.last_done || "").trim();
+  const estMin = Number(form.est_min);
+
+  if (!name) {
+    return "Please enter a task name.";
+  }
+  if (!Number.isFinite(freqDays) || freqDays < 1) {
+    return "Frequency must be at least 1 day.";
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(lastDone)) {
+    return "Last done date must be in YYYY-MM-DD format.";
+  }
+  if (!Number.isFinite(estMin) || estMin < 1) {
+    return "Estimated minutes must be at least 1.";
+  }
+
+  return null;
+}
+
+function Card({ children }) {
+  return (
+    <div
+      style={{
+        border: "1px solid #ddd",
+        borderRadius: 12,
+        padding: 14,
+        background: "#fff",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function Button({ children, onClick, disabled = false, kind = "default", type = "button" }) {
+  const bg =
+    kind === "primary" ? "#111" :
+    kind === "danger" ? "#b00020" :
+    "#f3f3f3";
+  const color = kind === "primary" || kind === "danger" ? "#fff" : "#111";
+
+  return (
+    <button
+      type={type}
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        padding: "10px 12px",
+        borderRadius: 10,
+        border: "1px solid #ddd",
+        background: disabled ? "#eee" : bg,
+        color: disabled ? "#777" : color,
+        cursor: disabled ? "not-allowed" : "pointer",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Field({ label, children }) {
+  return (
+    <label style={{ display: "grid", gap: 6 }}>
+      <div style={{ fontSize: 12, color: "#444" }}>{label}</div>
+      {children}
+    </label>
+  );
+}
+
+function Input(props) {
+  return (
+    <input
+      {...props}
+      style={{
+        padding: 10,
+        borderRadius: 10,
+        border: "1px solid #ddd",
+        background: "#fff",
+        width: "100%",
+      }}
+    />
+  );
+}
+
+function TaskModal({ open, mode, form, setForm, onClose, onSave, onDelete, saving }) {
+  if (!open) return null;
+
+  const title = mode === "edit" ? "Edit Task" : "Add Task";
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.35)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16,
+        zIndex: 1000,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "min(640px, 100%)",
+          background: "#fff",
+          borderRadius: 14,
+          border: "1px solid #ddd",
+          padding: 16,
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+          <h3 style={{ margin: 0 }}>{title}</h3>
+          <Button onClick={onClose}>Close</Button>
+        </div>
+
+        <div style={{ display: "grid", gap: 12, marginTop: 14 }}>
+          <Field label="Task name">
+            <Input
+              value={form.name}
+              onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
+              placeholder="e.g. Vacuum downstairs"
+            />
+          </Field>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <Field label="Frequency (days)">
+              <Input
+                type="number"
+                min="1"
+                value={form.freq_days}
+                onChange={(e) => setForm((prev) => ({ ...prev, freq_days: e.target.value }))}
+              />
+            </Field>
+
+            <Field label="Estimated minutes">
+              <Input
+                type="number"
+                min="1"
+                value={form.est_min}
+                onChange={(e) => setForm((prev) => ({ ...prev, est_min: e.target.value }))}
+              />
+            </Field>
+          </div>
+
+          <Field label="Last done date">
+            <Input
+              type="date"
+              value={form.last_done}
+              onChange={(e) => setForm((prev) => ({ ...prev, last_done: e.target.value }))}
+            />
+          </Field>
+
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 4 }}>
+            <Button kind="primary" onClick={onSave} disabled={saving}>
+              {saving ? "Saving..." : "Save"}
+            </Button>
+
+            {mode === "edit" && (
+              <Button kind="danger" onClick={onDelete} disabled={saving}>
+                Delete
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -107,6 +286,12 @@ export default function App() {
   const [importing, setImporting] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
 
+  const [taskModalOpen, setTaskModalOpen] = useState(false);
+  const [taskModalMode, setTaskModalMode] = useState("add");
+  const [editingTask, setEditingTask] = useState(null);
+  const [taskForm, setTaskForm] = useState(emptyTaskForm());
+  const [savingTask, setSavingTask] = useState(false);
+
   async function loadTasks() {
     setLoading(true);
     setErrorText("");
@@ -114,7 +299,7 @@ export default function App() {
     const { data, error } = await supabase
       .from("tasks")
       .select("*")
-      .order("updated_at", { ascending: false });
+      .order("name", { ascending: true });
 
     if (error) {
       setErrorText(error.message);
@@ -143,7 +328,101 @@ export default function App() {
       return;
     }
 
+    setStatusText(`Marked "${task.name}" done.`);
     await loadTasks();
+  }
+
+  function openAddTask() {
+    setTaskModalMode("add");
+    setEditingTask(null);
+    setTaskForm(emptyTaskForm());
+    setTaskModalOpen(true);
+  }
+
+  function openEditTask(task) {
+    setTaskModalMode("edit");
+    setEditingTask(task);
+    setTaskForm({
+      name: task.name ?? "",
+      freq_days: String(task.freq_days ?? 7),
+      last_done: task.last_done ?? todayISO(),
+      est_min: String(task.est_min ?? 15),
+    });
+    setTaskModalOpen(true);
+  }
+
+  async function saveTask() {
+    const validationError = validateTaskForm(taskForm);
+    if (validationError) {
+      alert(validationError);
+      return;
+    }
+
+    setSavingTask(true);
+    setErrorText("");
+    setStatusText("");
+
+    const row = {
+      name: String(taskForm.name).trim(),
+      freq_days: Number(taskForm.freq_days),
+      last_done: String(taskForm.last_done).trim(),
+      est_min: Number(taskForm.est_min),
+      updated_at: new Date().toISOString(),
+    };
+
+    try {
+      if (taskModalMode === "add") {
+        const { error } = await supabase.from("tasks").insert(row);
+        if (error) throw error;
+        setStatusText(`Added "${row.name}".`);
+      } else {
+        const { error } = await supabase
+          .from("tasks")
+          .update(row)
+          .eq("id", editingTask.id);
+        if (error) throw error;
+        setStatusText(`Updated "${row.name}".`);
+      }
+
+      setTaskModalOpen(false);
+      setEditingTask(null);
+      setTaskForm(emptyTaskForm());
+      await loadTasks();
+    } catch (err) {
+      setErrorText(err.message || String(err));
+    } finally {
+      setSavingTask(false);
+    }
+  }
+
+  async function deleteTask() {
+    if (!editingTask) return;
+
+    const ok = confirm(`Delete "${editingTask.name}"?`);
+    if (!ok) return;
+
+    setSavingTask(true);
+    setErrorText("");
+    setStatusText("");
+
+    try {
+      const { error } = await supabase
+        .from("tasks")
+        .delete()
+        .eq("id", editingTask.id);
+
+      if (error) throw error;
+
+      setStatusText(`Deleted "${editingTask.name}".`);
+      setTaskModalOpen(false);
+      setEditingTask(null);
+      setTaskForm(emptyTaskForm());
+      await loadTasks();
+    } catch (err) {
+      setErrorText(err.message || String(err));
+    } finally {
+      setSavingTask(false);
+    }
   }
 
   async function importFromBackupReplaceAll() {
@@ -191,6 +470,14 @@ export default function App() {
     }
   }
 
+  const sortedTasks = useMemo(() => {
+    return [...tasks].sort((a, b) => {
+      const aDue = computeDueISO(a);
+      const bDue = computeDueISO(b);
+      return aDue.localeCompare(bDue);
+    });
+  }, [tasks]);
+
   useEffect(() => {
     loadTasks();
   }, []);
@@ -217,15 +504,7 @@ export default function App() {
       <h1 style={{ marginTop: 0 }}>Housework Family</h1>
       <p>Shared family task list synced through Supabase.</p>
 
-      <div
-        style={{
-          border: "1px solid #ddd",
-          borderRadius: 12,
-          padding: 14,
-          background: "#f9f9f9",
-          marginBottom: 16,
-        }}
-      >
+      <Card>
         <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>
           Import from solo app backup
         </div>
@@ -245,9 +524,9 @@ export default function App() {
         />
 
         <div style={{ marginTop: 10 }}>
-          <button onClick={importFromBackupReplaceAll} disabled={importing || !selectedFile}>
+          <Button onClick={importFromBackupReplaceAll} disabled={importing || !selectedFile}>
             {importing ? "Importing..." : "Replace all tasks from backup"}
-          </button>
+          </Button>
         </div>
 
         {selectedFile && (
@@ -255,51 +534,66 @@ export default function App() {
             Selected file: {selectedFile.name}
           </div>
         )}
+      </Card>
 
-        {statusText && (
-          <div style={{ marginTop: 10, color: "green", fontSize: 14 }}>{statusText}</div>
-        )}
+      <div style={{ height: 14 }} />
+
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 }}>
+        <Button kind="primary" onClick={openAddTask}>+ Add Task</Button>
+        <Button onClick={loadTasks}>Refresh</Button>
       </div>
 
-      <div style={{ marginBottom: 16, display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <button onClick={loadTasks}>Refresh</button>
-      </div>
+      {statusText && (
+        <div style={{ marginBottom: 12, color: "green", fontSize: 14 }}>{statusText}</div>
+      )}
 
       {loading && <p>Loading tasks...</p>}
       {errorText && <p style={{ color: "crimson" }}>{errorText}</p>}
       {!loading && !errorText && tasks.length === 0 && <p>No tasks found.</p>}
 
       <div style={{ display: "grid", gap: 12 }}>
-        {tasks.map((task) => (
-          <div
-            key={task.id}
-            style={{
-              border: "1px solid #ddd",
-              borderRadius: 12,
-              padding: 14,
-              background: "#fff",
-            }}
-          >
-            <div style={{ fontSize: 18, fontWeight: 600 }}>{task.name}</div>
+        {sortedTasks.map((task) => (
+          <Card key={task.id}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+              <div style={{ minWidth: 260 }}>
+                <div style={{ fontSize: 18, fontWeight: 600 }}>{task.name}</div>
 
-            <div style={{ marginTop: 6, fontSize: 14, color: "#444" }}>
-              Every {task.freq_days}d · Last done {task.last_done} · Est {task.est_min} min
-            </div>
+                <div style={{ marginTop: 6, fontSize: 14, color: "#444" }}>
+                  Every {task.freq_days}d · Last done {task.last_done} · Est {task.est_min} min
+                </div>
 
-            <div style={{ marginTop: 6, fontSize: 14 }}>
-              {formatStatus(task)}
-            </div>
+                <div style={{ marginTop: 6, fontSize: 14 }}>
+                  {formatStatus(task)}
+                </div>
 
-            <div style={{ marginTop: 6, fontSize: 13, color: "#666" }}>
-              Updated at: {formatDateTime(task.updated_at)}
-            </div>
+                <div style={{ marginTop: 6, fontSize: 13, color: "#666" }}>
+                  Updated at: {formatDateTime(task.updated_at)}
+                </div>
+              </div>
 
-            <div style={{ marginTop: 10 }}>
-              <button onClick={() => markDone(task)}>Done</button>
+              <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                <Button kind="primary" onClick={() => markDone(task)}>Done</Button>
+                <Button onClick={() => openEditTask(task)}>Edit</Button>
+              </div>
             </div>
-          </div>
+          </Card>
         ))}
       </div>
+
+      <TaskModal
+        open={taskModalOpen}
+        mode={taskModalMode}
+        form={taskForm}
+        setForm={setTaskForm}
+        onClose={() => {
+          if (savingTask) return;
+          setTaskModalOpen(false);
+          setEditingTask(null);
+        }}
+        onSave={saveTask}
+        onDelete={deleteTask}
+        saving={savingTask}
+      />
     </div>
   );
 }
