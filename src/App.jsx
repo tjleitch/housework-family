@@ -1,6 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabaseClient";
 
+const FAMILY_MEMBERS = ["Mommy", "Daddy", "James", "Peter", "Tommy"];
+const USER_STORAGE_KEY = "housework_family_current_user";
+
 function todayISO() {
   const d = new Date();
   const y = d.getFullYear();
@@ -75,6 +78,7 @@ function mapBackupTasksToSupabaseRows(parsedJson) {
       freq_days: Number(t.freqDays),
       last_done: String(t.lastDoneISO || "").trim(),
       est_min: Number(t.estMin),
+      last_done_by: "",
       updated_at: new Date().toISOString(),
     }))
     .filter(
@@ -109,23 +113,15 @@ function validateTaskForm(form) {
   const lastDone = String(form.last_done || "").trim();
   const estMin = Number(form.est_min);
 
-  if (!name) {
-    return "Please enter a task name.";
-  }
-  if (!Number.isFinite(freqDays) || freqDays < 1) {
-    return "Frequency must be at least 1 day.";
-  }
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(lastDone)) {
-    return "Last done date must be in YYYY-MM-DD format.";
-  }
-  if (!Number.isFinite(estMin) || estMin < 1) {
-    return "Estimated minutes must be at least 1.";
-  }
+  if (!name) return "Please enter a task name.";
+  if (!Number.isFinite(freqDays) || freqDays < 1) return "Frequency must be at least 1 day.";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(lastDone)) return "Last done date must be in YYYY-MM-DD format.";
+  if (!Number.isFinite(estMin) || estMin < 1) return "Estimated minutes must be at least 1.";
 
   return null;
 }
 
-function Card({ children }) {
+function Card({ children, style = {} }) {
   return (
     <div
       style={{
@@ -133,6 +129,7 @@ function Card({ children }) {
         borderRadius: 12,
         padding: 14,
         background: "#fff",
+        ...style,
       }}
     >
       {children}
@@ -178,6 +175,21 @@ function Field({ label, children }) {
 function Input(props) {
   return (
     <input
+      {...props}
+      style={{
+        padding: 10,
+        borderRadius: 10,
+        border: "1px solid #ddd",
+        background: "#fff",
+        width: "100%",
+      }}
+    />
+  );
+}
+
+function Select(props) {
+  return (
+    <select
       {...props}
       style={{
         padding: 10,
@@ -286,11 +298,19 @@ export default function App() {
   const [importing, setImporting] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
 
+  const [currentUser, setCurrentUser] = useState(() => {
+    return localStorage.getItem(USER_STORAGE_KEY) || "Daddy";
+  });
+
   const [taskModalOpen, setTaskModalOpen] = useState(false);
   const [taskModalMode, setTaskModalMode] = useState("add");
   const [editingTask, setEditingTask] = useState(null);
   const [taskForm, setTaskForm] = useState(emptyTaskForm());
   const [savingTask, setSavingTask] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem(USER_STORAGE_KEY, currentUser);
+  }, [currentUser]);
 
   async function loadTasks() {
     setLoading(true);
@@ -318,6 +338,7 @@ export default function App() {
       .from("tasks")
       .update({
         last_done: today,
+        last_done_by: currentUser,
         updated_at: new Date().toISOString(),
       })
       .eq("id", task.id)
@@ -328,7 +349,7 @@ export default function App() {
       return;
     }
 
-    setStatusText(`Marked "${task.name}" done.`);
+    setStatusText(`Marked "${task.name}" done as ${currentUser}.`);
     await loadTasks();
   }
 
@@ -372,7 +393,10 @@ export default function App() {
 
     try {
       if (taskModalMode === "add") {
-        const { error } = await supabase.from("tasks").insert(row);
+        const { error } = await supabase.from("tasks").insert({
+          ...row,
+          last_done_by: "",
+        });
         if (error) throw error;
         setStatusText(`Added "${row.name}".`);
       } else {
@@ -504,6 +528,29 @@ export default function App() {
       <h1 style={{ marginTop: 0 }}>Housework Family</h1>
       <p>Shared family task list synced through Supabase.</p>
 
+      <Card style={{ marginBottom: 14 }}>
+        <div style={{ display: "grid", gap: 10 }}>
+          <div style={{ fontSize: 18, fontWeight: 600 }}>Who am I on this device?</div>
+          <div style={{ maxWidth: 280 }}>
+            <Field label="Current user">
+              <Select
+                value={currentUser}
+                onChange={(e) => setCurrentUser(e.target.value)}
+              >
+                {FAMILY_MEMBERS.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </div>
+          <div style={{ fontSize: 13, color: "#666" }}>
+            This choice is saved on this device and will be used when you tap Done.
+          </div>
+        </div>
+      </Card>
+
       <Card>
         <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>
           Import from solo app backup
@@ -567,6 +614,10 @@ export default function App() {
                 </div>
 
                 <div style={{ marginTop: 6, fontSize: 13, color: "#666" }}>
+                  Last done by: {task.last_done_by || "—"}
+                </div>
+
+                <div style={{ marginTop: 4, fontSize: 13, color: "#666" }}>
                   Updated at: {formatDateTime(task.updated_at)}
                 </div>
               </div>
