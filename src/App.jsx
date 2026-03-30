@@ -327,27 +327,44 @@ function TaskCard({ task, onDone, onEdit }) {
         opacity: doneToday ? 0.88 : 1,
       }}
     >
-      {doneToday && (
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            pointerEvents: "none",
-            fontSize: "clamp(72px, 14vw, 140px)",
-            fontWeight: 900,
+     {doneToday && (
+  <div
+    style={{
+      position: "absolute",
+      inset: 0,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      pointerEvents: "none",
+      fontSize: "clamp(72px, 14vw, 140px)",
+      fontWeight: 900,
+      transform: "rotate(-12deg)",
+      letterSpacing: 6,
+      lineHeight: 1,
+      userSelect: "none",
+
+      // 👇 conditional styling
+      ...(task.last_done_by === "Tommy"
+        ? {
+            background: `repeating-linear-gradient(
+              45deg,
+              orange,
+              orange 20px,
+              black 20px,
+              black 40px
+            )`,
+            WebkitBackgroundClip: "text",
+            WebkitTextFillColor: "transparent",
+            opacity: 0.35,
+          }
+        : {
             color: "rgba(200, 0, 0, 0.18)",
-            transform: "rotate(-12deg)",
-            letterSpacing: 6,
-            lineHeight: 1,
-            userSelect: "none",
-          }}
-        >
-          DONE
-        </div>
-      )}
+          }),
+    }}
+  >
+    DONE
+  </div>
+)}
 
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div style={{ minWidth: 260 }}>
